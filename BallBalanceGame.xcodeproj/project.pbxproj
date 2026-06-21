@@ -13,6 +13,7 @@
 		AA1111110000000000000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA2222220000000000000004 /* Assets.xcassets */; };
 		AA1111110000000000000005 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA2222220000000000000005 /* Preview Assets.xcassets */; };
 		AA1111110000000000000006 /* SoundManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2222220000000000000006 /* SoundManager.swift */; };
+		AA1111110000000000000007 /* StartScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2222220000000000000007 /* StartScene.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
 		AA2222220000000000000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA2222220000000000000005 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		AA2222220000000000000006 /* SoundManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundManager.swift; sourceTree = "<group>"; };
+		AA2222220000000000000007 /* StartScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartScene.swift; sourceTree = "<group>"; };
 		AA5555550000000000000003 /* BallBalanceGame.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BallBalanceGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -59,6 +61,7 @@
 				AA2222220000000000000002 /* ContentView.swift */,
 				AA2222220000000000000003 /* GameScene.swift */,
 				AA2222220000000000000006 /* SoundManager.swift */,
+				AA2222220000000000000007 /* StartScene.swift */,
 				AA2222220000000000000004 /* Assets.xcassets */,
 				AA4444440000000000000004 /* Preview Content */,
 			);
@@ -147,6 +150,7 @@
 				AA1111110000000000000001 /* BallBalanceGameApp.swift in Sources */,
 				AA1111110000000000000003 /* GameScene.swift in Sources */,
 				AA1111110000000000000006 /* SoundManager.swift in Sources */,
+				AA1111110000000000000007 /* StartScene.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

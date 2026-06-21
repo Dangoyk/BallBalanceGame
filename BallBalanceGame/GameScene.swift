@@ -27,15 +27,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var lastHoleTime: TimeInterval = 0
     private var holeInterval: TimeInterval = 4.0
     private var lastCoinTime: TimeInterval = 0
-    private var windChangeTimer: TimeInterval = 0
-    private var windInterval: TimeInterval = 6.0
     private var lastStreakTime: TimeInterval = 0
     private var lastTrailTime: TimeInterval = 0
 
-    // Wind
+    // Wind — split into current and pre-generated next
     private var windForce: CGVector = .zero
+    private var nextWindForce: CGVector = .zero
+    private var windChangeTimer: TimeInterval = 0
+    private var windInterval: TimeInterval = 6.0
+    private var windForecastShown = false
 
-    // Physics categories (no wall category — ball can fall off)
+    // Physics categories
     private let ballCategory: UInt32 = 0x1 << 0
     private let holeCategory: UInt32 = 0x1 << 1
     private let coinCategory: UInt32 = 0x1 << 2
@@ -60,7 +62,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         setupHUD()
         setupInstructions()
         startMotion()
-        changeWind()
+        applyInitialWind()
     }
 
     // MARK: - Setup
@@ -89,7 +91,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let body = SKPhysicsBody(circleOfRadius: ballRadius)
         body.categoryBitMask = ballCategory
         body.contactTestBitMask = holeCategory | coinCategory
-        body.collisionBitMask = 0   // No walls — ball can roll off the edge
+        body.collisionBitMask = 0   // No walls — ball can fall off the edge
         body.restitution = 0.4
         body.friction = 0.12
         body.linearDamping = 0.42
@@ -213,9 +215,24 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             lastCoinTime = currentTime
         }
 
+        // Wind forecast: show 3s before the change
+        if !windForecastShown && gameStartTime > 0 {
+            let timeUntilChange = windInterval - (currentTime - windChangeTimer)
+            if timeUntilChange <= 3.0 && timeUntilChange >= 0 {
+                prepareNextWind()
+                showWindForecast()
+                windForecastShown = true
+            }
+        }
+
+        // Apply prepared wind when timer expires
         if currentTime - windChangeTimer > windInterval {
-            changeWind()
+            windForce = nextWindForce
+            if hypot(windForce.dx, windForce.dy) > 4 { SoundManager.shared.play(.wind) }
+            windInterval = Double.random(in: 5...9)
             windChangeTimer = currentTime
+            windForecastShown = false
+            updateWindDisplay()
         }
 
         let windSpeed = hypot(windForce.dx, windForce.dy)
@@ -258,11 +275,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         guard currentTime - lastTrailTime > 0.025 else { return }
         lastTrailTime = currentTime
         let velocity = ball.physicsBody?.velocity ?? .zero
-        let speed = hypot(velocity.dx, velocity.dy)
-        guard speed > 30 else { return }
+        guard hypot(velocity.dx, velocity.dy) > 30 else { return }
 
-        let radius = CGFloat.random(in: 2.0...4.5)
-        let particle = SKShapeNode(circleOfRadius: radius)
+        let r = CGFloat.random(in: 2.0...4.5)
+        let particle = SKShapeNode(circleOfRadius: r)
         particle.fillColor = SKColor(white: 0.88, alpha: 0.55)
         particle.strokeColor = .clear
         particle.position = ball.position
@@ -271,10 +287,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         addChild(particle)
 
         particle.run(.sequence([
-            .group([
-                .scale(to: 0.05, duration: 0.30),
-                .fadeOut(withDuration: 0.30)
-            ]),
+            .group([.scale(to: 0.05, duration: 0.30), .fadeOut(withDuration: 0.30)]),
             .removeFromParent()
         ]))
     }
@@ -299,26 +312,35 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         hole.zPosition = 3
         hole.name = "hole"
         hole.userData = NSMutableDictionary(dictionary: ["radius": finalRadius])
-        hole.setScale(0)
+        hole.alpha = 0
         addChild(hole)
 
-        // Open animation — physics body added after fully open
-        hole.run(.scale(to: 1, duration: 1.15)) { [weak self, weak hole] in
-            guard let self, let hole, !self.isGameOver else { return }
-            let body = SKPhysicsBody(circleOfRadius: finalRadius)
-            body.isDynamic = false
-            body.categoryBitMask = self.holeCategory
-            body.contactTestBitMask = self.ballCategory
-            body.collisionBitMask = 0
-            hole.physicsBody = body
-        }
+        // Flicker warning, then solidify and become active
+        let flicker = SKAction.repeat(.sequence([
+            .fadeAlpha(to: 0.26, duration: 0.10),
+            .fadeAlpha(to: 0.00, duration: 0.10)
+        ]), count: 8)
 
-        // Close after lifetime: remove physics first, then shrink away
+        hole.run(.sequence([
+            flicker,
+            .fadeAlpha(to: 1.0, duration: 0.28),
+            .run { [weak self, weak hole] in
+                guard let self, let hole, !self.isGameOver else { return }
+                let body = SKPhysicsBody(circleOfRadius: finalRadius)
+                body.isDynamic = false
+                body.categoryBitMask = self.holeCategory
+                body.contactTestBitMask = self.ballCategory
+                body.collisionBitMask = 0
+                hole.physicsBody = body
+            }
+        ]))
+
+        // Close after lifetime
         let lifetime = Double.random(in: 15...22)
         hole.run(.sequence([
             .wait(forDuration: lifetime),
             .run { [weak hole] in hole?.physicsBody = nil },
-            .scale(to: 0, duration: 0.7),
+            .fadeOut(withDuration: 0.65),
             .removeFromParent()
         ]), withKey: "lifetime")
     }
@@ -342,7 +364,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         coin.zPosition = 4
         coin.name = "coin"
         coin.userData = NSMutableDictionary(dictionary: ["radius": radius])
-        coin.setScale(0)
+        coin.alpha = 0
 
         let shine = SKShapeNode(circleOfRadius: radius * 0.3)
         shine.fillColor = SKColor(white: 1, alpha: 0.65)
@@ -351,17 +373,26 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         shine.zPosition = 1
         coin.addChild(shine)
 
-        let body = SKPhysicsBody(circleOfRadius: radius)
-        body.isDynamic = false
-        body.categoryBitMask = coinCategory
-        body.contactTestBitMask = ballCategory
-        body.collisionBitMask = 0
-        coin.physicsBody = body
-
         addChild(coin)
 
+        // Flicker warning, then appear and become collectible
+        let flicker = SKAction.repeat(.sequence([
+            .fadeAlpha(to: 0.35, duration: 0.09),
+            .fadeAlpha(to: 0.00, duration: 0.09)
+        ]), count: 5)
+
         coin.run(.sequence([
-            .scale(to: 1, duration: 0.22),
+            flicker,
+            .fadeAlpha(to: 1.0, duration: 0.18),
+            .run { [weak coin] in
+                guard let coin else { return }
+                let body = SKPhysicsBody(circleOfRadius: radius)
+                body.isDynamic = false
+                body.categoryBitMask = self.coinCategory
+                body.contactTestBitMask = self.ballCategory
+                body.collisionBitMask = 0
+                coin.physicsBody = body
+            },
             .repeatForever(.sequence([
                 .scale(to: 1.1, duration: 0.5),
                 .scale(to: 1.0, duration: 0.5)
@@ -397,17 +428,23 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - Wind
 
-    private func changeWind() {
+    private func applyInitialWind() {
+        prepareNextWind()
+        windForce = nextWindForce
+        if hypot(windForce.dx, windForce.dy) > 4 { SoundManager.shared.play(.wind) }
+        windInterval = Double.random(in: 5...9)
+        windForecastShown = true   // Skip forecast for the starting wind
+        updateWindDisplay()
+    }
+
+    private func prepareNextWind() {
         if Double.random(in: 0...1) < 0.22 {
-            windForce = .zero
+            nextWindForce = .zero
         } else {
             let angle = CGFloat.random(in: 0...(2 * .pi))
             let strength = CGFloat.random(in: 6...18)
-            windForce = CGVector(dx: cos(angle) * strength, dy: sin(angle) * strength)
-            SoundManager.shared.play(.wind)
+            nextWindForce = CGVector(dx: cos(angle) * strength, dy: sin(angle) * strength)
         }
-        windInterval = Double.random(in: 5...9)
-        updateWindDisplay()
     }
 
     private func updateWindDisplay() {
@@ -423,6 +460,56 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                 ? SKColor(red: 0.42, green: 0.80, blue: 1, alpha: 1)
                 : SKColor(red: 1, green: 0.55, blue: 0.15, alpha: 1)
         }
+    }
+
+    private func showWindForecast() {
+        let strength = hypot(nextWindForce.dx, nextWindForce.dy)
+        let isComing = strength > 4
+
+        let panelH: CGFloat = 72
+        let panelW = size.width * 0.72
+        let hudBottom = size.height / 2 - (safeTop + 88)
+        let panelCenterY = hudBottom - panelH / 2 - 12
+
+        let accentColor: SKColor = !isComing
+            ? SKColor(white: 0.50, alpha: 0.8)
+            : strength < 12
+                ? SKColor(red: 0.42, green: 0.80, blue: 1, alpha: 0.9)
+                : SKColor(red: 1, green: 0.55, blue: 0.15, alpha: 0.95)
+
+        let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(white: 0, alpha: 0.82)
+        panel.strokeColor = accentColor
+        panel.lineWidth = 1.5
+        panel.position = CGPoint(x: 0, y: panelCenterY)
+        panel.zPosition = 15
+        panel.alpha = 0
+        panel.name = "forecast"
+        addChild(panel)
+
+        let header = SKLabelNode(fontNamed: "AvenirNext-Medium")
+        header.text = "WIND FORECAST"
+        header.fontSize = 11
+        header.fontColor = SKColor(white: 0.48, alpha: 1)
+        header.position = CGPoint(x: 0, y: panelH / 2 - 18)
+        header.zPosition = 1
+        panel.addChild(header)
+
+        let main = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        main.text = isComing ? "\(windArrow(for: nextWindForce))  \(strength < 12 ? "WIND" : "GUST")" : "CALM"
+        main.fontSize = 28
+        main.fontColor = accentColor
+        main.verticalAlignmentMode = .center
+        main.position = CGPoint(x: 0, y: -6)
+        main.zPosition = 1
+        panel.addChild(main)
+
+        panel.run(.sequence([
+            .fadeIn(withDuration: 0.28),
+            .wait(forDuration: 2.1),
+            .fadeOut(withDuration: 0.22),
+            .removeFromParent()
+        ]))
     }
 
     private func windArrow(for force: CGVector) -> String {
@@ -528,7 +615,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func didBegin(_ contact: SKPhysicsContact) {
         guard !isGameOver else { return }
-
         let a = contact.bodyA, b = contact.bodyB
 
         if a.categoryBitMask == coinCategory || b.categoryBitMask == coinCategory {
