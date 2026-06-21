@@ -9,21 +9,40 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var boardRect: CGRect = .zero
     private let motionManager = CMMotionManager()
 
+    // HUD labels
     private var scoreLabel: SKLabelNode!
     private var livesLabel: SKLabelNode!
+    private var coinLabel: SKLabelNode!
+    private var windLabel: SKLabelNode!
 
+    // Game state
     private var score: Int = 0
     private var lives: Int = 3
+    private var coinsCollected: Int = 0
     private var isGameOver = false
     private var isInvincible = false
     private var gameStartTime: TimeInterval = 0
+
+    // Hole timing
     private var lastHoleTime: TimeInterval = 0
     private var holeInterval: TimeInterval = 4.0
 
-    private let ballRadius: CGFloat = 18
+    // Coin timing
+    private var lastCoinTime: TimeInterval = 0
+    private var coinInterval: TimeInterval = 3.5
+
+    // Wind
+    private var windForce: CGVector = .zero
+    private var windChangeTimer: TimeInterval = 0
+    private var windInterval: TimeInterval = 6.0
+
+    // Physics categories
     private let ballCategory: UInt32 = 0x1 << 0
     private let wallCategory: UInt32 = 0x1 << 1
     private let holeCategory: UInt32 = 0x1 << 2
+    private let coinCategory: UInt32 = 0x1 << 3
+
+    private let ballRadius: CGFloat = 18
 
     private var highScore: Int {
         get { UserDefaults.standard.integer(forKey: "BallBalanceHighScore") }
@@ -43,6 +62,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         setupHUD()
         setupInstructions()
         startMotion()
+        changeWind()
     }
 
     // MARK: - Setup
@@ -55,7 +75,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func setupBoard() {
         let padding: CGFloat = 28
-        let topPadding: CGFloat = 135
+        let topPadding: CGFloat = 148
         boardRect = CGRect(
             x: -size.width / 2 + padding,
             y: -size.height / 2 + padding,
@@ -74,24 +94,25 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         wallBody.friction = 0.05
         wallBody.restitution = 0.65
         board.physicsBody = wallBody
-
         addChild(board)
 
-        // Corner glow dots
-        let corners: [CGPoint] = [
-            CGPoint(x: boardRect.minX + 16, y: boardRect.minY + 16),
-            CGPoint(x: boardRect.maxX - 16, y: boardRect.minY + 16),
-            CGPoint(x: boardRect.minX + 16, y: boardRect.maxY - 16),
-            CGPoint(x: boardRect.maxX - 16, y: boardRect.maxY - 16)
-        ]
-        for pt in corners {
+        for pt in boardCorners() {
             let dot = SKShapeNode(circleOfRadius: 4)
-            dot.fillColor = SKColor(red: 0.22, green: 0.42, blue: 0.88, alpha: 0.6)
+            dot.fillColor = SKColor(red: 0.22, green: 0.42, blue: 0.88, alpha: 0.55)
             dot.strokeColor = .clear
             dot.position = pt
             dot.zPosition = 1
             addChild(dot)
         }
+    }
+
+    private func boardCorners() -> [CGPoint] {
+        [
+            CGPoint(x: boardRect.minX + 16, y: boardRect.minY + 16),
+            CGPoint(x: boardRect.maxX - 16, y: boardRect.minY + 16),
+            CGPoint(x: boardRect.minX + 16, y: boardRect.maxY - 16),
+            CGPoint(x: boardRect.maxX - 16, y: boardRect.maxY - 16)
+        ]
     }
 
     private func setupBall() {
@@ -102,7 +123,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         ball.position = CGPoint(x: boardRect.midX, y: boardRect.midY)
         ball.zPosition = 5
 
-        // Shine highlight
         let shine = SKShapeNode(circleOfRadius: ballRadius * 0.28)
         shine.fillColor = SKColor(white: 1, alpha: 0.72)
         shine.strokeColor = .clear
@@ -112,7 +132,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let body = SKPhysicsBody(circleOfRadius: ballRadius)
         body.categoryBitMask = ballCategory
-        body.contactTestBitMask = holeCategory
+        body.contactTestBitMask = holeCategory | coinCategory
         body.collisionBitMask = wallCategory
         body.restitution = 0.4
         body.friction = 0.12
@@ -125,29 +145,54 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func setupHUD() {
+        // Title
         let titleLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
         titleLabel.text = "BALL BALANCE"
-        titleLabel.fontSize = 18
-        titleLabel.fontColor = SKColor(red: 0.22, green: 0.42, blue: 0.88, alpha: 0.85)
-        titleLabel.position = CGPoint(x: 0, y: size.height / 2 - 52)
+        titleLabel.fontSize = 16
+        titleLabel.fontColor = SKColor(red: 0.22, green: 0.42, blue: 0.88, alpha: 0.75)
+        titleLabel.position = CGPoint(x: 0, y: size.height / 2 - 46)
         titleLabel.zPosition = 10
         addChild(titleLabel)
 
+        // Score (left)
         scoreLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
         scoreLabel.text = "0s"
-        scoreLabel.fontSize = 38
+        scoreLabel.fontSize = 36
         scoreLabel.fontColor = .white
-        scoreLabel.position = CGPoint(x: 0, y: size.height / 2 - 88)
+        scoreLabel.horizontalAlignmentMode = .center
+        scoreLabel.position = CGPoint(x: -size.width / 4, y: size.height / 2 - 84)
         scoreLabel.zPosition = 10
         addChild(scoreLabel)
 
+        // Coins (right)
+        coinLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        coinLabel.text = "● 0"
+        coinLabel.fontSize = 26
+        coinLabel.fontColor = SKColor(red: 1, green: 0.82, blue: 0.10, alpha: 1)
+        coinLabel.horizontalAlignmentMode = .center
+        coinLabel.position = CGPoint(x: size.width / 4, y: size.height / 2 - 84)
+        coinLabel.zPosition = 10
+        addChild(coinLabel)
+
+        // Lives (left)
         livesLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
-        livesLabel.fontSize = 22
+        livesLabel.fontSize = 20
         livesLabel.fontColor = SKColor(red: 1, green: 0.28, blue: 0.28, alpha: 1)
-        livesLabel.position = CGPoint(x: 0, y: size.height / 2 - 120)
+        livesLabel.horizontalAlignmentMode = .center
+        livesLabel.position = CGPoint(x: -size.width / 4, y: size.height / 2 - 116)
         livesLabel.zPosition = 10
         updateLivesDisplay()
         addChild(livesLabel)
+
+        // Wind indicator (right)
+        windLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
+        windLabel.text = "CALM"
+        windLabel.fontSize = 17
+        windLabel.fontColor = SKColor(white: 0.5, alpha: 0.9)
+        windLabel.horizontalAlignmentMode = .center
+        windLabel.position = CGPoint(x: size.width / 4, y: size.height / 2 - 116)
+        windLabel.zPosition = 10
+        addChild(windLabel)
     }
 
     private func setupInstructions() {
@@ -158,7 +203,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         label.position = CGPoint(x: boardRect.midX, y: boardRect.midY - 55)
         label.zPosition = 6
         addChild(label)
-
         label.run(.sequence([
             .wait(forDuration: 2.5),
             .fadeOut(withDuration: 1.0),
@@ -181,7 +225,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     override func update(_ currentTime: TimeInterval) {
         guard !isGameOver else { return }
 
-        if gameStartTime == 0 { gameStartTime = currentTime }
+        if gameStartTime == 0 {
+            gameStartTime = currentTime
+            lastHoleTime = currentTime
+            lastCoinTime = currentTime
+            windChangeTimer = currentTime
+        }
+
         score = Int(currentTime - gameStartTime)
         scoreLabel.text = "\(score)s"
 
@@ -192,18 +242,32 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             lastHoleTime = currentTime
             holeInterval = max(1.4, holeInterval - 0.15)
         }
+
+        let ci = max(2.0, 3.5 - Double(score) / 120.0)
+        if currentTime - lastCoinTime > ci {
+            spawnCoin()
+            lastCoinTime = currentTime
+        }
+
+        if currentTime - windChangeTimer > windInterval {
+            changeWind()
+            windChangeTimer = currentTime
+        }
     }
 
     private func applyMotion() {
+        var dx = windForce.dx
+        var dy = windForce.dy
         #if targetEnvironment(simulator)
-        ball.physicsBody?.applyForce(simulatorForce)
+        dx += simulatorForce.dx
+        dy += simulatorForce.dy
         #else
         if let motion = motionManager.deviceMotion {
-            let gx = CGFloat(motion.gravity.x)
-            let gy = CGFloat(motion.gravity.y)
-            ball.physicsBody?.applyForce(CGVector(dx: gx * 68, dy: gy * 68))
+            dx += CGFloat(motion.gravity.x) * 68
+            dy += CGFloat(motion.gravity.y) * 68
         }
         #endif
+        ball.physicsBody?.applyForce(CGVector(dx: dx, dy: dy))
     }
 
     // MARK: - Holes
@@ -211,22 +275,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private func spawnHole() {
         let margin: CGFloat = 48
         let progress = min(1.0, CGFloat(score) / 60.0)
-        let minR = 15 + progress * 10
-        let maxR = 25 + progress * 16
-        let finalRadius = CGFloat.random(in: minR...maxR)
+        let finalRadius = CGFloat.random(in: (15 + progress * 10)...(25 + progress * 16))
 
-        var position = randomBoardPosition(margin: margin)
-        for _ in 0..<10 {
-            let candidate = randomBoardPosition(margin: margin)
-            if hypot(candidate.x - ball.position.x, candidate.y - ball.position.y) > finalRadius * 4 {
-                position = candidate
-                break
-            }
-        }
+        let position = safeRandomPosition(margin: margin, avoidRadius: finalRadius * 4)
 
         let hole = SKShapeNode(circleOfRadius: finalRadius)
         hole.fillColor = .black
-        hole.strokeColor = SKColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 0.9)
+        hole.strokeColor = SKColor(red: 0.85, green: 0.10, blue: 0.10, alpha: 0.9)
         hole.lineWidth = 2.5
         hole.position = position
         hole.zPosition = 3
@@ -245,6 +300,135 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
+    // MARK: - Coins
+
+    private func spawnCoin() {
+        let margin: CGFloat = 44
+        let radius: CGFloat = 11
+        let position = safeRandomPosition(margin: margin, avoidRadius: 60)
+
+        let coin = SKShapeNode(circleOfRadius: radius)
+        coin.fillColor = SKColor(red: 1, green: 0.82, blue: 0.10, alpha: 1)
+        coin.strokeColor = SKColor(red: 0.88, green: 0.62, blue: 0, alpha: 1)
+        coin.lineWidth = 2
+        coin.position = position
+        coin.zPosition = 4
+        coin.name = "coin"
+        coin.setScale(0)
+
+        let shine = SKShapeNode(circleOfRadius: radius * 0.3)
+        shine.fillColor = SKColor(white: 1, alpha: 0.65)
+        shine.strokeColor = .clear
+        shine.position = CGPoint(x: -radius * 0.3, y: radius * 0.3)
+        shine.zPosition = 1
+        coin.addChild(shine)
+
+        let body = SKPhysicsBody(circleOfRadius: radius)
+        body.isDynamic = false
+        body.categoryBitMask = coinCategory
+        body.contactTestBitMask = ballCategory
+        body.collisionBitMask = 0
+        coin.physicsBody = body
+
+        addChild(coin)
+
+        // Appear then pulse
+        coin.run(.sequence([
+            .scale(to: 1, duration: 0.22),
+            .repeatForever(.sequence([
+                .scale(to: 1.1, duration: 0.5),
+                .scale(to: 1.0, duration: 0.5)
+            ]))
+        ]), withKey: "pulse")
+
+        // Auto-remove after 8 seconds
+        coin.run(.sequence([
+            .wait(forDuration: 7.5),
+            .run { coin.removeAllActions() },
+            .fadeOut(withDuration: 0.5),
+            .removeFromParent()
+        ]), withKey: "autoRemove")
+    }
+
+    private func collectCoin(_ node: SKNode) {
+        guard node.parent != nil else { return }
+        node.physicsBody = nil
+        node.removeAllActions()
+
+        coinsCollected += 1
+        coinLabel.text = "● \(coinsCollected)"
+        SoundManager.shared.play(.coin)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+        node.run(.sequence([
+            .group([
+                .scale(to: 1.7, duration: 0.12),
+                .fadeOut(withDuration: 0.14)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    // MARK: - Wind
+
+    private func changeWind() {
+        let calm = Double.random(in: 0...1) < 0.22
+        if calm {
+            windForce = .zero
+        } else {
+            let angle = CGFloat.random(in: 0...(2 * .pi))
+            let strength = CGFloat.random(in: 12...38)
+            windForce = CGVector(dx: cos(angle) * strength, dy: sin(angle) * strength)
+            SoundManager.shared.play(.wind)
+        }
+        windInterval = Double.random(in: 5...9)
+        updateWindDisplay()
+    }
+
+    private func updateWindDisplay() {
+        let strength = hypot(windForce.dx, windForce.dy)
+        if strength < 4 {
+            windLabel.text = "CALM"
+            windLabel.fontColor = SKColor(white: 0.45, alpha: 0.9)
+        } else {
+            let arrow = windArrow(for: windForce)
+            let label = strength < 24 ? "WIND" : "GUST"
+            windLabel.text = "\(arrow) \(label)"
+            windLabel.fontColor = strength < 24
+                ? SKColor(red: 0.42, green: 0.80, blue: 1, alpha: 1)
+                : SKColor(red: 1, green: 0.55, blue: 0.15, alpha: 1)
+        }
+    }
+
+    private func windArrow(for force: CGVector) -> String {
+        let deg = (atan2(Double(force.dy), Double(force.dx)) * 180 / .pi + 360)
+            .truncatingRemainder(dividingBy: 360)
+        switch deg {
+        case 337.5..<360, 0..<22.5: return "→"
+        case 22.5..<67.5:            return "↗"
+        case 67.5..<112.5:           return "↑"
+        case 112.5..<157.5:          return "↖"
+        case 157.5..<202.5:          return "←"
+        case 202.5..<247.5:          return "↙"
+        case 247.5..<292.5:          return "↓"
+        default:                      return "↘"
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func safeRandomPosition(margin: CGFloat, avoidRadius: CGFloat) -> CGPoint {
+        var best = randomBoardPosition(margin: margin)
+        for _ in 0..<12 {
+            let candidate = randomBoardPosition(margin: margin)
+            if hypot(candidate.x - ball.position.x, candidate.y - ball.position.y) > avoidRadius {
+                best = candidate
+                break
+            }
+        }
+        return best
+    }
+
     private func randomBoardPosition(margin: CGFloat) -> CGPoint {
         CGPoint(
             x: CGFloat.random(in: boardRect.minX + margin...boardRect.maxX - margin),
@@ -255,10 +439,20 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Physics Contact
 
     func didBegin(_ contact: SKPhysicsContact) {
-        guard !isGameOver, !isInvincible else { return }
-        let isHole = contact.bodyA.categoryBitMask == holeCategory
-                  || contact.bodyB.categoryBitMask == holeCategory
-        if isHole { ballFellInHole() }
+        guard !isGameOver else { return }
+
+        let a = contact.bodyA, b = contact.bodyB
+
+        if a.categoryBitMask == coinCategory || b.categoryBitMask == coinCategory {
+            let coinBody = a.categoryBitMask == coinCategory ? a : b
+            if let node = coinBody.node { collectCoin(node) }
+            return
+        }
+
+        guard !isInvincible else { return }
+        if a.categoryBitMask == holeCategory || b.categoryBitMask == holeCategory {
+            ballFellInHole()
+        }
     }
 
     // MARK: - Ball Events
@@ -266,6 +460,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private func ballFellInHole() {
         lives -= 1
         updateLivesDisplay()
+        SoundManager.shared.play(.hole)
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
 
         if lives <= 0 {
             triggerGameOver()
@@ -278,7 +474,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         ball.position = CGPoint(x: boardRect.midX, y: boardRect.midY)
 
         let flash = SKAction.repeat(.sequence([
-            .run { [weak self] in self?.ball.alpha = 0.22 },
+            .run { [weak self] in self?.ball.alpha = 0.20 },
             .wait(forDuration: 0.11),
             .run { [weak self] in self?.ball.alpha = 1.0 },
             .wait(forDuration: 0.11)
@@ -295,6 +491,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         isGameOver = true
         motionManager.stopDeviceMotionUpdates()
         ball.physicsBody?.isDynamic = false
+        SoundManager.shared.play(.gameOver)
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
 
         let prevBest = highScore
         let isNewBest = score > prevBest
@@ -304,49 +502,29 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             x: -size.width / 2, y: -size.height / 2,
             width: size.width, height: size.height
         ))
-        overlay.fillColor = SKColor(white: 0, alpha: 0.74)
+        overlay.fillColor = SKColor(white: 0, alpha: 0.76)
         overlay.strokeColor = .clear
         overlay.zPosition = 20
         addChild(overlay)
 
-        let gameOverLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-        gameOverLabel.text = "GAME OVER"
-        gameOverLabel.fontSize = 52
-        gameOverLabel.fontColor = .white
-        gameOverLabel.position = CGPoint(x: 0, y: 110)
-        gameOverLabel.zPosition = 21
-        addChild(gameOverLabel)
-
-        let timeLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
-        timeLabel.text = "Survived  \(score)s"
-        timeLabel.fontSize = 30
-        timeLabel.fontColor = SKColor(red: 0.35, green: 0.78, blue: 1, alpha: 1)
-        timeLabel.position = CGPoint(x: 0, y: 56)
-        timeLabel.zPosition = 21
-        addChild(timeLabel)
+        addGameOverLabel("GAME OVER", fontSize: 52, color: .white, y: 115)
+        addGameOverLabel("Survived  \(score)s", fontSize: 30,
+                         color: SKColor(red: 0.35, green: 0.78, blue: 1, alpha: 1), y: 60)
+        addGameOverLabel("● \(coinsCollected) coins", fontSize: 22,
+                         color: SKColor(red: 1, green: 0.82, blue: 0.10, alpha: 1), y: 22)
 
         if isNewBest {
-            let newBestLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-            newBestLabel.text = "NEW BEST!"
-            newBestLabel.fontSize = 24
-            newBestLabel.fontColor = SKColor(red: 1, green: 0.85, blue: 0.2, alpha: 1)
-            newBestLabel.position = CGPoint(x: 0, y: 16)
-            newBestLabel.zPosition = 21
-            addChild(newBestLabel)
+            addGameOverLabel("NEW BEST!", fontSize: 22,
+                             color: SKColor(red: 1, green: 0.85, blue: 0.2, alpha: 1), y: -14)
         } else if prevBest > 0 {
-            let bestLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
-            bestLabel.text = "Best: \(prevBest)s"
-            bestLabel.fontSize = 20
-            bestLabel.fontColor = SKColor(white: 0.55, alpha: 1)
-            bestLabel.position = CGPoint(x: 0, y: 16)
-            bestLabel.zPosition = 21
-            addChild(bestLabel)
+            addGameOverLabel("Best: \(prevBest)s", fontSize: 18,
+                             color: SKColor(white: 0.55, alpha: 1), y: -14)
         }
 
         let button = SKShapeNode(rectOf: CGSize(width: 224, height: 58), cornerRadius: 29)
         button.fillColor = SKColor(red: 0.22, green: 0.42, blue: 0.88, alpha: 1)
         button.strokeColor = .clear
-        button.position = CGPoint(x: 0, y: -50)
+        button.position = CGPoint(x: 0, y: -68)
         button.zPosition = 21
         button.name = "restart"
 
@@ -358,6 +536,18 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         btnLabel.name = "restart"
         button.addChild(btnLabel)
         addChild(button)
+    }
+
+    @discardableResult
+    private func addGameOverLabel(_ text: String, fontSize: CGFloat, color: SKColor, y: CGFloat) -> SKLabelNode {
+        let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        label.text = text
+        label.fontSize = fontSize
+        label.fontColor = color
+        label.position = CGPoint(x: 0, y: y)
+        label.zPosition = 21
+        addChild(label)
+        return label
     }
 
     // MARK: - Touch
@@ -386,8 +576,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func handleRestartTouch(_ touches: Set<UITouch>) {
         guard let touch = touches.first else { return }
-        let loc = touch.location(in: self)
-        if nodes(at: loc).contains(where: { $0.name == "restart" }) {
+        if nodes(at: touch.location(in: self)).contains(where: { $0.name == "restart" }) {
             let newScene = GameScene(size: size)
             newScene.scaleMode = scaleMode
             view?.presentScene(newScene, transition: .fade(withDuration: 0.4))
@@ -398,9 +587,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private func updateSimulatorForce(_ touches: Set<UITouch>) {
         guard let touch = touches.first else { return }
         let loc = touch.location(in: self)
-        let dx = (loc.x / (size.width / 2)) * 68
-        let dy = (loc.y / (size.height / 2)) * 68
-        simulatorForce = CGVector(dx: dx, dy: dy)
+        simulatorForce = CGVector(
+            dx: (loc.x / (size.width / 2)) * 68,
+            dy: (loc.y / (size.height / 2)) * 68
+        )
     }
     #endif
 
