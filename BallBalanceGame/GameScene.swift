@@ -415,9 +415,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func randomBoardPosition(margin: CGFloat) -> CGPoint {
         let hudH = safeTop + 100
-        CGPoint(
-            x: CGFloat.random(in: -size.width / 2 + margin...size.width / 2 - margin),
-            y: CGFloat.random(in: -size.height / 2 + margin...size.height / 2 - hudH - margin)
+        let minX = -size.width / 2 + margin
+        let maxX = size.width / 2 - margin
+        let minY = -size.height / 2 + margin
+        let maxY = size.height / 2 - hudH - margin
+        guard minX < maxX, minY < maxY else { return .zero }
+        return CGPoint(
+            x: CGFloat.random(in: minX...maxX),
+            y: CGFloat.random(in: minY...maxY)
         )
     }
 
