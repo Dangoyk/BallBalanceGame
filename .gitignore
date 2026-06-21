@@ -1,0 +1,24 @@
+# Xcode build artifacts
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+
+# Debug symbols
+*.dSYM.zip
+*.dSYM
+
+# Archives & distribution
+*.ipa
+*.xcarchive
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
