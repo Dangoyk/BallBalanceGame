@@ -6,7 +6,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Properties
 
     private var ball: SKShapeNode!
-    private var boardRect: CGRect = .zero
     private var safeTop: CGFloat = 60
     private let motionManager = CMMotionManager()
 
@@ -73,15 +72,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func setupBoard() {
-        // Fill the entire screen — walls at the edges
-        boardRect = CGRect(
+        let screenRect = CGRect(
             x: -size.width / 2,
             y: -size.height / 2,
             width: size.width,
             height: size.height
         )
 
-        let wallBody = SKPhysicsBody(edgeLoopFrom: boardRect)
+        let wallBody = SKPhysicsBody(edgeLoopFrom: screenRect)
         wallBody.categoryBitMask = wallCategory
         wallBody.friction = 0.05
         wallBody.restitution = 0.65
@@ -329,14 +327,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         coin.run(.sequence([
             .wait(forDuration: 7.5),
-            .run { coin.removeAllActions() },
+            .run { [weak coin] in coin?.removeAction(forKey: "pulse") },
             .fadeOut(withDuration: 0.5),
             .removeFromParent()
         ]), withKey: "autoRemove")
     }
 
     private func collectCoin(_ node: SKNode) {
-        guard node.parent != nil else { return }
+        guard node.physicsBody != nil else { return }
         node.physicsBody = nil
         node.removeAllActions()
 
